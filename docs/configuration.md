@@ -56,40 +56,6 @@ spec:
     storage:
       create_default_storage_class: false
       type: external_storage
-  images:
-    default_pull_policy: IfNotPresent
-    calico:
-      cni:
-        image: docker.io/calico/cni
-        version: v3.24.5
-      kubecontrollers:
-        image: docker.io/calico/kube-controllers
-        version: v3.24.5
-      node:
-        image: docker.io/calico/node
-        version: v3.24.5
-    coredns:
-      image: docker.io/coredns/coredns
-      version: 1.10.0
-    konnectivity:
-      image: quay.io/k0sproject/apiserver-network-proxy-agent
-      version: 0.0.33-k0s
-    kubeproxy:
-      image: registry.k8s.io/kube-proxy
-      version: v1.26.0
-    kuberouter:
-      cni:
-        image: docker.io/cloudnativelabs/kube-router
-        version: v1.5.1
-      cniInstaller:
-        image: quay.io/k0sproject/cni-node
-        version: 1.1.1-k0s.0
-    metricsserver:
-      image: registry.k8s.io/metrics-server/metrics-server
-      version: v0.6.2
-    pushgateway:
-      image: quay.io/k0sproject/pushgateway-ttl
-      version: edge@sha256:7031f6bf6c957e2fdb496161fe3bea0a5bde3de800deeba7b2155187196ecbd9
   installConfig:
     users:
       etcdUser: etcd
@@ -110,10 +76,20 @@ spec:
     kuberouter:
       autoMTU: true
       hairpin: Enabled
+      ipMasq: false
       metricsPort: 8080
       mtu: 0
       peerRouterASNs: ""
       peerRouterIPs: ""
+    nodeLocalLoadBalancing:
+      enabled: false
+      envoyProxy:
+        apiServerBindPort: 7443
+        image:
+          image: docker.io/envoyproxy/envoy-distroless
+          version: v1.24.1
+        konnectivityServerBindPort: 7132
+      type: EnvoyProxy
     podCIDR: 10.244.0.0/16
     provider: kuberouter
     serviceCIDR: 10.96.0.0/12
@@ -227,15 +203,71 @@ CALICO_IPV6POOL_CIDR: "{{ spec.network.dualStack.IPv6podCIDR }}"
 | `peerRouterASNs` | Comma-separated list of [global peer ASNs](https://github.com/cloudnativelabs/kube-router/blob/master/docs/bgp.md#global-external-bgp-peers).                                                                                                                             |
 | `hairpin`        | Hairpin mode, supported modes `Enabled`: enabled cluster wide, `Allowed`: must be allowed per service [using annotations](https://github.com/cloudnativelabs/kube-router/blob/master/docs/user-guide.md#hairpin-mode), `Disabled`: doesn't work at all (default: Enabled) |
 | `hairpinMode`    | **Deprecated** Use `hairpin` instead. If both `hairpin` and `hairpinMode` are defined, this is ignored. If only hairpinMode is configured explicitly activates hairpinMode (https://github.com/cloudnativelabs/kube-router/blob/master/docs/user-guide.md#hairpin-mode).  |
+| `ipMasq`         | IP masquerade for traffic originating from the pod network, and destined outside of it (default: false) |
 
 **Note**: Kube-router allows many networking aspects to be configured per node, service, and pod (for more information, refer to the [Kube-router user guide](https://github.com/cloudnativelabs/kube-router/blob/master/docs/user-guide.md)).
 
 #### `spec.network.kubeProxy`
 
-| Element          | Description                                                                                      |
-| ---------------- | ------------------------------------------------------------------------------------------------ |
-| `disabled`       | Disable kube-proxy altogether (default: `false`).                                                |
-| `mode`           | Kube proxy operating mode, supported modes `iptables`, `ipvs`, `userspace` (default: `iptables`) |
+| Element    | Description                                                                                      |
+|------------|--------------------------------------------------------------------------------------------------|
+| `disabled` | Disable kube-proxy altogether (default: `false`).                                                |
+| `mode`     | Kube proxy operating mode, supported modes `iptables`, `ipvs`, `userspace` (default: `iptables`) |
+| `iptables` | Kube proxy iptables settings                                                                     |
+| `ipvs`     | Kube proxy ipvs settings                                                                         |
+
+Default kube-proxy iptables settings:
+
+```yaml
+iptables:
+  masqueradeAll: false
+  masqueradeBit: null
+  minSyncPeriod: 0s
+  syncPeriod: 0s
+```
+
+Default kube-proxy ipvs settings:
+
+```yaml
+ipvs:
+  excludeCIDRs: null
+  minSyncPeriod: 0s
+  scheduler: ""
+  strictARP: false
+  syncPeriod: 0s
+  tcpFinTimeout: 0s
+  tcpTimeout: 0s
+  udpTimeout: 0s
+```
+
+#### `spec.network.nodeLocalLoadBalancing`
+
+Configuration options related to k0s's [node-local load balancing] feature.
+
+**Note:** This feature is experimental! Expect instabilities and/or breaking
+changes.
+
+| Element          | Description                                                                                                                   |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`        | Indicates if node-local load balancing should be used to access Kubernetes API servers from worker nodes. Default: `false`.   |
+| `type`           | The type of the node-local load balancer to deploy on worker nodes. Default: `EnvoyProxy`. (This is the only option for now.) |
+| `envoyProxy`     | Configuration options related to the "EnvoyProxy" type of load balancing.                                                     |
+
+[node-local load balancing]: ../nllb
+
+##### `spec.network.nodeLocalLoadBalancing.envoyProxy`
+
+Configuration options required for using Envoy as the backing implementation for
+node-local load balancing.
+
+**Note:** This type of load balancing is not supported on ARMv7 workers.
+
+| Element                      | Description                                                                                                                               |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `image`                      | The OCI image that's being used for the Envoy Pod.                                                                                        |
+| `imagePullPolicy`            | The pull policy being used used for the Envoy Pod. Defaults to `spec.images.default_pull_policy` if omitted.                              |
+| `apiServerBindPort`          | Port number on which to bind the Envoy load balancer for the Kubernetes API server to on a worker's loopback interface.  Default: `7443`. |
+| `konnectivityServerBindPort` | Port number on which to bind the Envoy load balancer for the konnectivity server to on a worker's loopback interface. Default: `7132`.    |
 
 ### `spec.controllerManager`
 
@@ -345,6 +377,8 @@ spec:
       image: quay.io/coredns/coredns
       version: v1.7.0
 ```
+
+If you want the list of default images and their versions to be included, use `k0s config create --include-images`.
 
 #### Available keys
 

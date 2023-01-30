@@ -19,6 +19,7 @@ package constant
 import (
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -87,23 +88,11 @@ func TestEtcdModuleVersions(t *testing.T) {
 				strings.HasSuffix(modulePath, "/v"+etcdVersionParts[0])
 		},
 		func(t *testing.T, pkgPath string, module *packages.Module) bool {
-			// TODO: Restore the old test behavior once the Go dependencies can
-			// be updated to the current etcd version without opening
-			// dependora's box.
-
-			return !assert.NotEqual(t, "v"+etcdVersion, module.Version,
-				"Module version for package %s matches, consider restoring the old test behavior: %+#v",
-				pkgPath, module,
+			return !assert.Equal(t, "v"+etcdVersion, module.Version,
+				"Module version for package %s doesn't match: %+#v",
 			)
-
-			// return !assert.Equal(t, "v"+etcdVersion, module.Version,
-			// 	"Module version for package %s doesn't match: %+#v",
-			// 	pkgPath, module,
-			// )
 		},
 	)
-
-	t.Skip("This test is skipped until the etcd Go dependencies can be updated to the current version.")
 }
 
 func TestContainerdModuleVersions(t *testing.T) {
@@ -139,14 +128,15 @@ func TestRuncModuleVersions(t *testing.T) {
 }
 
 func getVersion(t *testing.T, component string) string {
-	cmd := exec.Command("./vars.sh", component+"_version")
+	cmd := exec.Command("sh", "./vars.sh", component+"_version")
 	cmd.Dir = filepath.Join("..", "..")
 
 	out, err := cmd.Output()
 	require.NoError(t, err)
 	require.NotEmpty(t, out, "failed to get %s version", component)
 
-	return strings.TrimSuffix(string(out), "\n")
+	trailingNewlines := regexp.MustCompilePOSIX("(\r?\n)+$")
+	return string(trailingNewlines.ReplaceAll(out, []byte{}))
 }
 
 func checkPackageModules(t *testing.T, filter func(modulePath string) bool, check func(t *testing.T, pkgPath string, module *packages.Module) bool) {

@@ -191,6 +191,12 @@ func (s *FootlooseSuite) SetupSuite() {
 	go func() {
 		defer cleanupTasks.Done()
 		<-ctx.Done()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			// Record a test failure when the deadline has been exceeded. This
+			// is to ensure that the test is actually marked as failed and the
+			// cluster state will be recorded.
+			assert.Fail(t, "Test deadline exceeded")
+		}
 
 		t.Logf("Cleaning up")
 
@@ -732,6 +738,27 @@ func (s *FootlooseSuite) StopController(name string) error {
 	return s.launchDelegate.StopController(s.Context(), ssh)
 }
 
+func (s *FootlooseSuite) StartController(name string) error {
+	ssh, err := s.SSH(name)
+	s.Require().NoError(err)
+	defer ssh.Disconnect()
+	return s.launchDelegate.StartController(s.Context(), ssh)
+}
+
+func (s *FootlooseSuite) StartWorker(name string) error {
+	ssh, err := s.SSH(name)
+	s.Require().NoError(err)
+	defer ssh.Disconnect()
+	return s.launchDelegate.StartWorker(s.Context(), ssh)
+}
+
+func (s *FootlooseSuite) StopWorker(name string) error {
+	ssh, err := s.SSH(name)
+	s.Require().NoError(err)
+	defer ssh.Disconnect()
+	return s.launchDelegate.StopWorker(s.Context(), ssh)
+}
+
 func (s *FootlooseSuite) Reset(name string) error {
 	ssh, err := s.SSH(name)
 	s.Require().NoError(err)
@@ -843,25 +870,13 @@ func (s *FootlooseSuite) ExtensionsClient(node string, k0sKubeconfigArgs ...stri
 }
 
 // WaitForNodeReady wait that we see the given node in "Ready" state in kubernetes API
-func (s *FootlooseSuite) WaitForNodeReady(name string, kc *kubernetes.Clientset) error {
+func (s *FootlooseSuite) WaitForNodeReady(name string, kc kubernetes.Interface) error {
 	s.T().Logf("waiting to see %s ready in kube API", name)
-	return watch.Nodes(kc.CoreV1().Nodes()).
-		WithObjectName(name).
-		WithErrorCallback(RetryWatchErrors(s.T().Logf)).
-		Until(s.Context(), func(n *corev1.Node) (bool, error) {
-			for _, nc := range n.Status.Conditions {
-				if nc.Type == corev1.NodeReady {
-					if nc.Status == corev1.ConditionTrue {
-						s.T().Logf("%s is ready in API", n.Name)
-						return true, nil
-					}
-
-					break
-				}
-			}
-
-			return false, nil
-		})
+	if err := WaitForNodeReadyStatus(s.Context(), kc, name, corev1.ConditionTrue); err != nil {
+		return err
+	}
+	s.T().Logf("%s is ready in API", name)
+	return nil
 }
 
 // GetNodeLabels return the labels of given node

@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,6 +50,10 @@ type Supervisor struct {
 	TimeoutRespawn time.Duration
 	// For those components having env prefix convention such as ETCD_xxx, we should keep the prefix.
 	KeepEnvPrefix bool
+	// ProcFSPath is only used for testing
+	ProcFSPath string
+	// KillFunction is only used for testing
+	KillFunction func(int, syscall.Signal) error
 	// A function to clean some leftovers before starting or restarting the supervised process
 	CleanBeforeFn func() error
 
@@ -59,6 +64,8 @@ type Supervisor struct {
 	startStopMutex sync.Mutex
 	cancel         context.CancelFunc
 }
+
+const k0sManaged = "_K0S_MANAGED=yes"
 
 // processWaitQuit waits for a process to exit or a shut down signal
 // returns true if shutdown is requested
@@ -78,10 +85,28 @@ func (s *Supervisor) processWaitQuit(ctx context.Context) bool {
 	select {
 	case <-ctx.Done():
 		for {
-			s.log.Infof("Shutting down pid %d", s.cmd.Process.Pid)
-			err := s.cmd.Process.Signal(syscall.SIGTERM)
-			if err != nil {
-				s.log.Warnf("Failed to send SIGTERM to pid %d: %s", s.cmd.Process.Pid, err)
+			if runtime.GOOS == "windows" {
+				// Graceful shutdown not implemented on Windows. This requires
+				// attaching to the target process's console and generating a
+				// CTRL+BREAK (or CTRL+C) event. Since a process can only be
+				// attached to a single console at a time, this would require
+				// k0s to detach from its own console, which is definitely not
+				// something that k0s wants to do. There might be ways to do
+				// this by generating the event via a separate helper process,
+				// but that's left open here as a TODO.
+				// https://learn.microsoft.com/en-us/windows/console/freeconsole
+				// https://learn.microsoft.com/en-us/windows/console/attachconsole
+				// https://learn.microsoft.com/en-us/windows/console/generateconsolectrlevent
+				// https://learn.microsoft.com/en-us/windows/console/ctrl-c-and-ctrl-break-signals
+				s.log.Infof("Killing pid %d", s.cmd.Process.Pid)
+				if err := s.cmd.Process.Kill(); err != nil {
+					s.log.Warnf("Failed to kill pid %d: %s", s.cmd.Process.Pid, err)
+				}
+			} else {
+				s.log.Infof("Shutting down pid %d", s.cmd.Process.Pid)
+				if err := s.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+					s.log.Warnf("Failed to send SIGTERM to pid %d: %s", s.cmd.Process.Pid, err)
+				}
 			}
 			select {
 			case <-time.After(s.TimeoutStop):
@@ -92,9 +117,9 @@ func (s *Supervisor) processWaitQuit(ctx context.Context) bool {
 		}
 	case err := <-waitresult:
 		if err != nil {
-			s.log.Warn(err)
+			s.log.WithError(err).Warn("Failed to wait for process")
 		} else {
-			s.log.Warnf("Process exited with code: %d", s.cmd.ProcessState.ExitCode())
+			s.log.Warnf("Process exited: %s", s.cmd.ProcessState)
 		}
 	}
 	return false
@@ -121,6 +146,10 @@ func (s *Supervisor) Supervise() error {
 	}
 	if s.TimeoutRespawn == 0 {
 		s.TimeoutRespawn = 5 * time.Second
+	}
+
+	if err := s.maybeKillPidFile(nil, nil); err != nil {
+		return err
 	}
 
 	var ctx context.Context
@@ -254,6 +283,8 @@ func getEnv(dataDir, component string, keepEnvPrefix bool) []string {
 		}
 		i++
 	}
+	env = append([]string{k0sManaged}, env...)
+	i++
 
 	return env[:i]
 }

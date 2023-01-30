@@ -8,7 +8,7 @@ ARG KUBE_VERSION
 # Apply our changes to the image
 COPY root/ /
 
-RUN apk add openrc openssh-server bash busybox-initscripts coreutils curl haproxy nginx inotify-tools
+RUN apk add openrc openssh-server bash busybox-openrc coreutils curl haproxy nginx inotify-tools
 # enable syslog and sshd
 RUN rc-update add cgroups boot
 RUN rc-update add syslog boot
@@ -36,7 +36,7 @@ RUN curl -L https://github.com/etcd-io/etcd/releases/download/v$ETCD_VERSION/etc
   | tar xz -C /opt --strip-components=1
 
 # Install cri-dockerd shim for custom CRI testing
-RUN curl -sSfLo /tmp/cri-dockerd.tgz https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.0/cri-dockerd-0.3.0.amd64.tgz \
+RUN curl -sSfLo /tmp/cri-dockerd.tgz https://github.com/Mirantis/cri-dockerd/releases/download/v0.3.1/cri-dockerd-0.3.1.amd64.tgz \
   && tar xf /tmp/cri-dockerd.tgz --directory /tmp/ \
   && mv /tmp/cri-dockerd/cri-dockerd /usr/local/bin/cri-dockerd \
   && rm -rf /tmp/cri-dockerd \

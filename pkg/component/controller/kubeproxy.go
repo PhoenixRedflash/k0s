@@ -18,18 +18,19 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
-
-	"github.com/k0sproject/k0s/pkg/component/manager"
-
-	"github.com/sirupsen/logrus"
+	"reflect"
 
 	"github.com/k0sproject/k0s/internal/pkg/dir"
 	"github.com/k0sproject/k0s/internal/pkg/templatewriter"
 	"github.com/k0sproject/k0s/pkg/apis/k0s.k0sproject.io/v1beta1"
+	"github.com/k0sproject/k0s/pkg/component/manager"
 	"github.com/k0sproject/k0s/pkg/constant"
+	"github.com/sirupsen/logrus"
 )
 
 // KubeProxy is the component implementation to manage kube-proxy
@@ -78,7 +79,7 @@ func (k *KubeProxy) Reconcile(_ context.Context, clusterConfig *v1beta1.ClusterC
 	if err != nil {
 		return err
 	}
-	if cfg == k.previousConfig {
+	if reflect.DeepEqual(cfg, k.previousConfig) {
 		k.log.Infof("current cfg matches existing, not gonna do anything")
 		return nil
 	}
@@ -103,15 +104,55 @@ func (k *KubeProxy) Stop() error {
 }
 
 func (k *KubeProxy) getConfig(clusterConfig *v1beta1.ClusterConfig) (proxyConfig, error) {
+	controlPlaneEndpoint := k.nodeConf.Spec.API.APIAddressURL()
+	nllb := clusterConfig.Spec.Network.NodeLocalLoadBalancing
+	if nllb.IsEnabled() {
+		switch nllb.Type {
+		case v1beta1.NllbTypeEnvoyProxy:
+			k.log.Debugf("Enabling node-local load balancing via %s", nllb.Type)
+
+			// FIXME: Transitions from non-node-local load balanced to node-local load
+			// balanced setups will be problematic: The controller will update the
+			// DaemonSet with localhost, but the worker nodes won't reconcile their
+			// state (yet) and need to be restarted manually in order to start their
+			// load balancer. Transitions in the other direction suffer from the same
+			// limitation, but that will be less grave, as the node-local load
+			// balancers will remain operational until the next node restart and the
+			// proxy will stay connected.
+
+			// FIXME: This is not exactly on par with the way it's implemented on the
+			// worker side, i.e. there's no fallback if localhost doesn't resolve to a
+			// loopback address. But this would require some shenanigans to pull in
+			// node-specific values here. A possible solution would be to convert
+			// kube-proxy to a static Pod as well.
+			controlPlaneEndpoint = fmt.Sprintf("https://localhost:%d", nllb.EnvoyProxy.APIServerBindPort)
+
+		default:
+			k.log.Warnf("Unsupported node-local load balancer type (%q), using %q as control plane endpoint", controlPlaneEndpoint)
+		}
+	}
+
 	cfg := proxyConfig{
 		ClusterCIDR:          clusterConfig.Spec.Network.BuildPodCIDR(),
-		ControlPlaneEndpoint: clusterConfig.Spec.API.APIAddressURL(),
+		ControlPlaneEndpoint: controlPlaneEndpoint,
 		Image:                clusterConfig.Spec.Images.KubeProxy.URI(),
 		PullPolicy:           clusterConfig.Spec.Images.DefaultPullPolicy,
 		DualStack:            clusterConfig.Spec.Network.DualStack.Enabled,
 		Mode:                 clusterConfig.Spec.Network.KubeProxy.Mode,
 		MetricsBindAddress:   clusterConfig.Spec.Network.KubeProxy.MetricsBindAddress,
 	}
+
+	iptables, err := json.Marshal(clusterConfig.Spec.Network.KubeProxy.IPTables)
+	if err != nil {
+		return proxyConfig{}, err
+	}
+	cfg.IPTables = string(iptables)
+
+	ipvs, err := json.Marshal(clusterConfig.Spec.Network.KubeProxy.IPVS)
+	if err != nil {
+		return proxyConfig{}, err
+	}
+	cfg.IPVS = string(ipvs)
 
 	return cfg, nil
 }
@@ -124,6 +165,8 @@ type proxyConfig struct {
 	PullPolicy           string
 	Mode                 string
 	MetricsBindAddress   string
+	IPTables             string
+	IPVS                 string
 }
 
 const proxyTemplate = `
@@ -230,20 +273,8 @@ data:
     enableProfiling: false
     healthzBindAddress: ""
     hostnameOverride: ""
-    iptables:
-      masqueradeAll: false
-      masqueradeBit: null
-      minSyncPeriod: 0s
-      syncPeriod: 0s
-    ipvs:
-      excludeCIDRs: null
-      minSyncPeriod: 0s
-      scheduler: ""
-      strictARP: false
-      syncPeriod: 0s
-      tcpFinTimeout: 0s
-      tcpTimeout: 0s
-      udpTimeout: 0s
+    iptables: {{ .IPTables }}
+    ipvs: {{ .IPVS }}
     kind: KubeProxyConfiguration
     metricsBindAddress: {{ .MetricsBindAddress }}
     nodePortAddresses: null
