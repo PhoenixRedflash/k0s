@@ -17,7 +17,7 @@ require (
 	github.com/cilium/ebpf v0.20.0
 	github.com/cloudflare/cfssl v1.6.5
 	github.com/containerd/cgroups/v3 v3.1.1
-	github.com/containerd/containerd v1.7.28
+	github.com/containerd/containerd v1.7.29
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/evanphx/json-patch v5.9.11+incompatible
 	github.com/fsnotify/fsnotify v1.9.0
@@ -61,7 +61,7 @@ require (
 	golang.org/x/sys v0.38.0
 	golang.org/x/tools v0.38.0
 	google.golang.org/grpc v1.76.0
-	helm.sh/helm/v3 v3.19.0
+	helm.sh/helm/v3 v3.19.1
 )
 
 // Kubernetes
@@ -123,7 +123,7 @@ require (
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
-	github.com/cyphar/filepath-securejoin v0.4.1 // indirect
+	github.com/cyphar/filepath-securejoin v0.6.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/daviddengcn/go-colortext v1.0.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
