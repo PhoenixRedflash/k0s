@@ -25,7 +25,7 @@ require (
 	github.com/go-openapi/jsonpointer v0.23.1
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/google/go-cmp v0.7.0
-	github.com/hashicorp/terraform-exec v0.25.1
+	github.com/hashicorp/terraform-exec v0.25.2
 	github.com/k0sproject/bootloose v0.9.6
 	github.com/k0sproject/dig v0.4.0
 	github.com/k0sproject/version v0.8.0
